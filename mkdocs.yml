@@ -1,0 +1,38 @@
+site_name: Crystallite Size Calculator
+site_description: Documentation for determining crystallite sizes using the Envelope Function Approach
+site_author: Bafgreat
+repo_url: https://github.com/bafgreat/crystallite_size_calculator.git
+
+theme:
+  name: material
+  logo: images/logo.png         # Optional: Add a custom logo (ensure path is correct)
+  favicon: images/favicon.ico    # Optional: Add a favicon (ensure path is correct)
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: pink
+  font:
+    text: Roboto
+    code: Roboto Mono
+
+nav:
+  - Home: index.md               # Correct path for index.md
+  - Algorithm Overview:
+      - Method: algorithm_overview.md  # Path doesn't need to include docs/ as docs/ is the default content directory
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - admonition
+
+extra_css:
+  - static/css/custom.css         # Path fixed; should reference relative to the docs folder
+
+extra_javascript:
+  - static/js/custom.js           # Path fixed; should reference relative to the docs folder
+
+plugins:
+  - search
+  - awesome-pages
+

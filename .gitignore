@@ -1,0 +1,6 @@
+._test.png
+.history/
+.pyenv/
+poetry.lock
+crystallite_size_calculator/__pycache__/
+tests/__pycache__
