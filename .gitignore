@@ -4,3 +4,6 @@
 poetry.lock
 crystallite_size_calculator/__pycache__/
 tests/__pycache__
+.vscode/
+crystallite_size_calculator/._filetyper.py
+tests/test_data/._LaB6_mp-2680_computed.cif

@@ -2,12 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.fft import fft
-from ase.io import read
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
 from pymatgen.analysis.diffraction.neutron import NDCalculator
-from pymatgen.io.ase import AseAtomsAdaptor
 from rdfpy import rdf
-
+from crystallite_size_calculator import filetyper
 
 
 class PXRDProcessor:
@@ -152,23 +150,53 @@ class PXRDProcessor:
         plt.xlim(0, 10)
         plt.show()
 
-
-def load_cif(cif_filename):
+def get_pxrd_from_structure(structure, wavelength='CuKa'):
     """
-    Load a crystal structure from a CIF file using ase and convert
-    to pymatgen structure
-    **Rarameters:**
-        - cif_filename : str
-        The filename of the CIF file.
+    Compute the powder X-ray diffraction
+
+    **Parameters:**
+        - structure : pymat structure
+            Pymatgen structure to compute pxrd.
+
     **Returns:**
-        - pymatgen.Structure : The pymatgen structure.
+        - two_theta : np.ndarray
+            Two theta angles .
+        - intensities : np.ndarray
+            intensities of the pxrd.
+        - hkl: np.ndarray
+            hkl
     """
-    ase_atoms = read(cif_filename)
-    structure = AseAtomsAdaptor.get_structure(ase_atoms)
-    return structure
+    xrd_calculator = XRDCalculator(wavelength=wavelength)
+    pattern = xrd_calculator.get_pattern(structure)
+    two_theta = np.array(pattern.x)
+    intensities = np.array(pattern.y)
+    hkl = pattern.hkls
+    return two_theta, intensities, hkl
 
+def get_neutron_diffraction_from_structure(structure, wavelength='CuKa'):
+    """
+    Compute neutron diffraction
 
-def compute_pxrd(cif_filename, wavelengths='CuKa'):
+    **Parameters:**
+        - structure : pymat structure
+            Pymatgen structure to compute neutron diffraction.
+
+    **Returns:**
+        - two_theta : np.ndarray
+            Two theta angles .
+        - intensities : np.ndarray
+            intensities of the neutron diffraction.
+        - hkl: np.ndarray
+            hkl
+    """
+    nd_calculator = NDCalculator(wavelength=wavelength)
+    pattern = nd_calculator.get_pattern(structure)
+    two_theta = np.array(pattern.x)
+    intensities = np.array(pattern.y)
+    hkl = pattern.hkls
+    return two_theta, intensities, hkl
+
+def compute_pxrd(cif_filename, wavelength='CuKa'):
     """
     Compute the powder X-ray diffraction
 
@@ -182,8 +210,8 @@ def compute_pxrd(cif_filename, wavelengths='CuKa'):
         - g_r : np.ndarray
             Array of g(r) values (radial distribution function).
     """
-    structure = load_cif(cif_filename)
-    xrd_calculator = XRDCalculator(wavelengths=wavelengths)
+    structure = filetyper.load_pystructure_from_cif(cif_filename)
+    xrd_calculator = XRDCalculator(wavelength=wavelength)
     pattern = xrd_calculator.get_pattern(structure)
     two_theta = np.array(pattern.x)
     intensities = np.array(pattern.y)
@@ -191,7 +219,7 @@ def compute_pxrd(cif_filename, wavelengths='CuKa'):
     return two_theta, intensities, hkl
 
 
-def compute_neutron_diffraction(cif_filename, wavelengths='CuKa'):
+def compute_neutron_diffraction(cif_filename, wavelength='CuKa'):
     """
     Compute the powder X-ray diffraction
 
@@ -205,8 +233,8 @@ def compute_neutron_diffraction(cif_filename, wavelengths='CuKa'):
         - g_r : np.ndarray
             Array of g(r) values (radial distribution function).
     """
-    structure = load_cif(cif_filename)
-    nd_calculator = NDCalculator(wavelengths=wavelengths)
+    structure = filetyper.load_pystructure_from_cif(cif_filename)
+    nd_calculator = NDCalculator(wavelength=wavelength)
     pattern = nd_calculator.get_pattern(structure)
     two_theta = np.array(pattern.x)
     intensities = np.array(pattern.y)

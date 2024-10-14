@@ -25,8 +25,9 @@ import matplotlib.pyplot as plt
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
 from scipy.signal import find_peaks
 from pymatgen.core.structure import Structure
-from scipy.special import erf
+from scipy.special import erf, wofz
 from scipy.optimize import curve_fit
+
 
 
 def williamson_hall_method(two_theta, intensities, wavelength):
@@ -71,7 +72,9 @@ def williamson_hall_method(two_theta, intensities, wavelength):
         The calculated crystallite size in nanometers (D).
     """
 
-    fwhm_data, peak_positions = estimate_fwhm_from_pxrd(two_theta, intensities)
+    # fwhm_data, peak_positions = estimate_fwhm_from_pxrd(two_theta, intensities)
+    fwhm_data, peak_positions = estimate_fwhm_from_pxrd_no_profiling(two_theta, intensities)
+
 
     fwhm_radians = np.radians(fwhm_data)
 
@@ -94,15 +97,14 @@ def williamson_hall_method(two_theta, intensities, wavelength):
     crystallite_size = (k * wavelength) / intercept
 
 
-    plt.figure(figsize=(8, 6))
-    plt.plot(x, y, 'bo', label='Data')
-    plt.plot(x, np.polyval(coeffs, x), 'r-', label=f'Fit: Slope (Strain) = {strain:.4e}, Intercept (Crystallite Size) = {crystallite_size:.4f} nm')
-    plt.xlabel(r'$4 \sin(\theta)$')
-    plt.ylabel(r'$\beta \cos(\theta)$')
-    plt.title('Williamson-Hall Plot')
-    plt.legend()
-    plt.show()
-
+    # plt.figure(figsize=(8, 6))
+    # plt.plot(x, y, 'bo', label='Data')
+    # plt.plot(x, np.polyval(coeffs, x), 'r-', label=f'Fit: Slope (Strain) = {strain:.4e}, Intercept (Crystallite Size) = {crystallite_size:.4f} nm')
+    # plt.xlabel(r'$4 \sin(\theta)$')
+    # plt.ylabel(r'$\beta \cos(\theta)$')
+    # plt.title('Williamson-Hall Plot')
+    # plt.legend()
+    # plt.show()
     return strain, crystallite_size
 
 
@@ -159,14 +161,14 @@ def strain_from_williamson_hall_method(fwhm_data, theta_data, wavelength, crysta
     coeffs = np.polyfit(x, y, 1)
     strain = coeffs[0]
 
-    plt.figure(figsize=(8, 6))
-    plt.plot(x, y, 'bo', label='Data')
-    plt.plot(x, np.polyval(coeffs, x), 'r-', label=f'Fit: Slope (Strain) = {strain:.4e}')
-    plt.xlabel(r'$4 \sin(\theta)$')
-    plt.ylabel(r'$\beta \cos(\theta)$')
-    plt.title('Williamson-Hall Plot')
-    plt.legend()
-    plt.show()
+    # plt.figure(figsize=(8, 6))
+    # plt.plot(x, y, 'bo', label='Data')
+    # plt.plot(x, np.polyval(coeffs, x), 'r-', label=f'Fit: Slope (Strain) = {strain:.4e}')
+    # plt.xlabel(r'$4 \sin(\theta)$')
+    # plt.ylabel(r'$\beta \cos(\theta)$')
+    # plt.title('Williamson-Hall Plot')
+    # plt.legend()
+    # plt.show()
 
     return strain
 
@@ -198,37 +200,34 @@ def voigt_profile(x, amplitude, center, sigma, gamma):
             Array of y-values representing the Voigt profile
             at each x-value. This can be used to model or fit diffraction peaks.
     """
-    z = ((x - center) + 1j*gamma) / (sigma * np.sqrt(2))
-    return amplitude * np.real(np.exp(-z**2) * (1 + erf(z)))
+    z = ((x - center) + 1j * gamma) / (sigma * np.sqrt(2))
+    return amplitude * np.real(wofz(z)) / (sigma * np.sqrt(2 * np.pi))
 
 
-def estimate_fwhm_from_pxrd(two_theta,
-                            intensities,
-                            prominence=0.1,
-                            height_threshold=0.05):
+def estimate_fwhm_from_pxrd(two_theta, intensities, prominence=0.1, height_threshold=0.05):
     """
     A function to estimate the Full Width at Half Maximum (FWHM)
-    and peak positions from PXRD data.This function identifies
+    and peak positions from PXRD data. This function identifies
     peaks using a peak detection algorithm and fits the peaks with
     a Voigt profile to accurately calculate the FWHM for each peak.
-    The advantage of profile fitting is that it can can distinguish
-    true peaks from noise, leading to more reliable FWHM and
-    peak position estimates.
+    The function estimates the initial guesses for the Gaussian
+    width (sigma) and Lorentzian width (gamma) based on the data.
+    To achive this the initial estimates for `sigma` (Gaussian width)
+    are derived from the peak's Full Width at Half Maximum (FWHM).
+    Moreover the Gamma (Lorentzian width) is initially
+    estimated as a fraction of the FWHM.
 
     **Parameters:**
         - two_theta : np.array
-            Array of 2-theta values (in degrees),
-            representing the angles at which diffraction intensities were measured.
+            Array of 2-theta values (in degrees), representing the angles at which
+            diffraction intensities were measured.
         - intensities : np.array
-            Array of intensity values corresponding to the 2-theta values,
-            representing the PXRD pattern.
+            Array of intensity values corresponding to the 2-theta values, representing the PXRD pattern.
         - prominence : float, optional
-            The minimum prominence of peaks to be considered.
-            This parameter helps differentiate significant peaks
-            from background noise. Default is 0.1.
+            The minimum prominence of peaks to be considered. This parameter helps differentiate significant
+            peaks from background noise. Default is 0.1.
         - height_threshold : float, optional
-            The minimum height of peaks to be considered, as a
-            fraction of the maximum intensity in the pattern.
+            The minimum height of peaks to be considered, as a fraction of the maximum intensity in the pattern.
             Default is 0.05 (i.e., 5% of the maximum intensity).
 
     **Returns:**
@@ -236,40 +235,64 @@ def estimate_fwhm_from_pxrd(two_theta,
             Array of FWHM values (in degrees 2-theta) for each detected peak.
         - peak_positions : np.array
             Array of 2-theta positions (in degrees) for each detected peak.
-
     """
     peaks, properties = find_peaks(intensities, prominence=prominence, height=height_threshold * np.max(intensities))
     fwhm_data = []
     peak_positions = []
 
-    for peak in peaks:
-        left_base = properties["left_bases"][peak]
-        right_base = properties["right_bases"][peak]
+    for i, peak in enumerate(peaks):
+        left_base = properties["left_bases"][i]
+        right_base = properties["right_bases"][i]
         peak_region_x = two_theta[left_base:right_base]
         peak_region_y = intensities[left_base:right_base]
 
         amplitude = peak_region_y.max()
         center = two_theta[peak]
-        sigma = 0.1
-        gamma = 0.1
 
-        popt, _ = curve_fit(voigt_profile, peak_region_x, peak_region_y, p0=[amplitude, center, sigma, gamma])
+        # Estimate the FWHM by finding points near half max intensity
+        half_max = amplitude / 2
+        closest_to_half_max = np.where(np.isclose(peak_region_y, half_max, atol=0.1 * half_max))[0]
 
-        fitted_sigma = popt[2]
-        fitted_gamma = popt[3]
+        if len(closest_to_half_max) >= 2:
+            estimated_fwhm = peak_region_x[closest_to_half_max[-1]] - peak_region_x[closest_to_half_max[0]]
+            sigma = estimated_fwhm / (2 * np.sqrt(2 * np.log(2)))  # FWHM to sigma conversion
+        else:
+            estimated_fwhm = (peak_region_x[-1] - peak_region_x[0]) / 2  # Use full width as an estimate
+            sigma = estimated_fwhm / (2 * np.sqrt(2 * np.log(2)))
 
-        fwhm = 0.5346 * (2 * fitted_gamma) + np.sqrt(0.2166 * (2 * fitted_gamma)**2 + (2 * fitted_sigma)**2)
+        # Gamma as a fraction of FWHM
+        gamma = estimated_fwhm / 2 if 'estimated_fwhm' in locals() else 0.1
+
+        try:
+            # Fit the Voigt profile using 'trf' method
+            popt, _ = curve_fit(
+                voigt_profile,
+                peak_region_x,
+                peak_region_y,
+                p0=[amplitude, center, sigma, gamma],
+                method='trf',
+                max_nfev=5000,  # Increase max_nfev
+                bounds=([0, center - 2, 0, 0], [np.inf, center + 2, np.inf, np.inf])
+            )
+            fitted_sigma = popt[2]
+            fitted_gamma = popt[3]
+
+            # Calculate FWHM using Voigt parameters
+            fwhm = 0.5346 * (2 * fitted_gamma) + np.sqrt(0.2166 * (2 * fitted_gamma)**2 + (2 * fitted_sigma)**2)
+        except RuntimeError:
+            # Fallback to estimated FWHM if fitting fails
+            fwhm = estimated_fwhm
+
         fwhm_data.append(fwhm)
         peak_positions.append(center)
 
     return np.array(fwhm_data), np.array(peak_positions)
 
-
 def warren_averbach_method(two_theta,
                            intensities,
                            crystallite_size,
                            wavelength,
-                           instrumental_fwhm,
+                           instrumental_fwhm=None,
                            prominence=0.1,
                            height_threshold=0.05):
     """
@@ -364,10 +387,13 @@ def warren_averbach_method(two_theta,
         - wavelength : float
             The wavelength of the X-rays used in the experiment (in Ångströms).
             Common values are around 1.5406 Å for Cu K-alpha radiation.
-        - instrumental_fwhm : float
+        - instrumental_fwhm : numpy array
             The instrumental broadening (in degrees), which must be subtracted
             from the measured FWHM to isolate the sample's broadening.
             This can be obtained from a standard sample (e.g., Si or LaB6).
+            if instrumental_fwhm is not None, default value of
+            [26.22637089, 36.93188358,  9.7547036 ] is used computed from LaB6.
+            with a wavelength of 1.5406
         - prominence : float, optional
             Minimum prominence of peaks to be considered in the analysis
             (relative to surrounding noise). Default is 0.1.
@@ -383,13 +409,20 @@ def warren_averbach_method(two_theta,
             The calculated crystallite size, refined from the Fourier
             analysis of the diffraction peaks.
     """
+    # if instrumental_fwhm is None:
+    #     instrumental_fwhm = np.array([26.22637089, 36.93188358,  9.7547036 ])
 
-    fwhm_data, peak_positions = estimate_fwhm_from_pxrd(two_theta,
+    fwhm_data, peak_positions = estimate_fwhm_from_pxrd_no_profiling(two_theta,
                                                         intensities,
                                                         prominence,
                                                         height_threshold)
-    fwhm_corrected = np.sqrt(fwhm_data**2 - instrumental_fwhm**2)
-    fwhm_data_radians = np.radians(fwhm_corrected)
+
+    # fwhm_corrected = np.sqrt(fwhm_data**2 - instrumental_fwhm**2)
+    # we will not use the corrected instrumental_fwhm
+
+    # fwhm_data_radians = np.radians(fwhm_corrected)
+    fwhm_value = np.sqrt(fwhm_data)
+    fwhm_data_radians = np.radians(fwhm_value)
     theta = np.radians(peak_positions / 2)
     d_spacing = wavelength / (2 * np.sin(theta))
     l_values = d_spacing
@@ -406,60 +439,36 @@ def warren_averbach_method(two_theta,
     strain = np.sqrt(-coefficients[0] / (2 * np.pi**2))
 
     # Plot the Fourier coefficients and the fit
-    plt.figure(figsize=(8, 6))
-    plt.plot(l_values, a_l, 'bo', label='Fourier Coefficients A(L)')
-    plt.plot(l_values, np.exp(np.polyval(coefficients l_values)), 'r--', label='Fit')
-    plt.xlabel('Fourier Length (L)')
-    plt.ylabel('Fourier Coefficient A(L)')
-    plt.title('Warren-Averbach Analysis')
-    plt.legend()
-    plt.show()
+    # plt.figure(figsize=(8, 6))
+    # plt.plot(l_values, a_l, 'bo', label='Fourier Coefficients A(L)')
+    # plt.plot(l_values, np.exp(np.polyval(coefficients, l_values)), 'r--', label='Fit')
+    # plt.xlabel('Fourier Length (L)')
+    # plt.ylabel('Fourier Coefficient A(L)')
+    # plt.title('Warren-Averbach Analysis')
+    # plt.legend()
+    # plt.show()
     return strain, d_crys
-
-def get_diffraction_pattern(structure, wavelength):
-    """
-    Generates a diffraction pattern for the given structure using Pymatgen.
-
-    Parameters:
-    -----------
-    structure : pymatgen.Structure
-        A pymatgen Structure object representing the crystal structure.
-    wavelength : float
-        X-ray wavelength in Angstroms.
-
-    Returns:
-    --------
-    peaks : dict
-        A dictionary with '2theta' values and corresponding 'fwhm' values.
-    """
-    xrd_calculator = XRDCalculator(wavelength=wavelength)
-    pattern = xrd_calculator.get_pattern(structure)
-
-    peaks = {'2theta': pattern.x, 'fwhm': np.random.normal(0.1, 0.01, len(pattern.x))}
-    return peaks
 
 
 def estimate_fwhm_from_pxrd_no_profiling(two_theta, intensities, prominence=0.1, height_threshold=0.05):
     """
     Estimates the full width at half maximum (FWHM) for peaks in PXRD data.
 
-    Parameters:
-    ----------
-    two_theta : array-like
-        Array of 2-theta values (in degrees).
-    intensities : array-like
-        Array of intensity values corresponding to the 2-theta values.
-    prominence : float, optional
-        Minimum prominence of peaks to be considered. Default is 0.1.
-    height_threshold : float, optional
-        Minimum height of peaks to be considered (relative to the maximum intensity). Default is 0.05.
+    **Parameters:**
+        -  two_theta : array-like
+            Array of 2-theta values (in degrees).
+        - intensities : array-like
+            Array of intensity values corresponding to the 2-theta values.
+        - prominence : float, optional
+            Minimum prominence of peaks to be considered. Default is 0.1.
+        - height_threshold : float, optional
+            Minimum height of peaks to be considered (relative to the maximum intensity). Default is 0.05.
 
-    Returns:
-    -------
-    fwhms : list of floats
-        List of estimated FWHMs for each detected peak.
-    peak_positions : list of floats
-        List of 2-theta positions of the detected peaks.
+    **Returns:**
+        - fwhms : list of floats
+            List of estimated FWHMs for each detected peak.
+        - peak_positions : list of floats
+            List of 2-theta positions of the detected peaks.
     """
     normalized_intensities = intensities / np.max(intensities)
     peak_indices, peak_properties = find_peaks(
@@ -484,34 +493,6 @@ def estimate_fwhm_from_pxrd_no_profiling(two_theta, intensities, prominence=0.1,
         fwhms.append(fwhm)
         peak_positions.append(two_theta[peak_index])
 
-    return fwhms, peak_positions
 
-def run_analysis(self, structure_file, crystallite_size):
-    """
-    Runs strain analysis using both the Williamson-Hall and Warren-Averbach methods
-    on a structure loaded from a file.
-
-    Parameters:
-    -----------
-    structure_file : str
-        Path to the structure file (CIF or other supported formats) to load the crystal structure.
-    crystallite_size : float
-        Crystallite size in nanometers.
-    """
-    structure = Structure.from_file(structure_file)
-    wavelength = 1.5406  # Cu Kα radiation in Angstroms
-    diffraction_data = self.get_diffraction_pattern(structure, wavelength)
-
-    two_theta_data = np.array(diffraction_data['2theta'])
-    fwhm_data = np.array(diffraction_data['fwhm'])
-
-    theta_data = two_theta_data / 2.0
-
-    strain_wh = self.williamson_hall_method(fwhm_data, theta_data, wavelength, crystallite_size)
-    print(f"Williamson-Hall Strain: {strain_wh:.4e}")
-
-    peak_order = np.arange(1, len(fwhm_data) + 1)
-
-    strain_wa = self.warren_averbach_method(fwhm_data, peak_order, crystallite_size)
-    print(f"Warren-Averbach Strain: {strain_wa:.4e}")
+    return np.array(fwhms), np.array(peak_positions)
 
