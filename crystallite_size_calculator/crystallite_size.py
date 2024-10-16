@@ -61,7 +61,7 @@ class ComputeCrystalSizes:
                 Array of G(r) values (radial distribution function).
         """
         r, g_r = self.compute_rdf_from_diffraction_pattern()
-        d_crys = envelope_function_approach.fit_envelope_function(g_r, r, num_intervals=10, initial_guess=(1))
+        d_crys = envelope_function_approach.fit_envelope_approximation(g_r, r)
         return round(d_crys, 3)
 
     def size_strain_from_williamson_hall_method(self):
@@ -109,10 +109,35 @@ class ComputeCrystalSizes:
         crystallite_size = self.compute_crystallite_size_from_envelope_function()
         strain, d_crys = strain_calculator.warren_averbach_method(self.two_theta,
                                                                   self.intensity,
+                                                                  crystallite_size,
                                                                   self.wavelength,
-                                                                  crystallite_size
                                                                   )
         return round(strain, 3), round(d_crys, 3)
+
+    def size_from_scherrer_eq(self):
+        """
+        Compute the crystallite size from the Scherrer equation.
+
+        **Returns:**
+            - d_crys : float
+                The estimated average crystallite size.
+        """
+        fwhm_data, peak_positions = strain_calculator.estimate_fwhm_from_pxrd_no_profiling(self.two_theta, self.intensity)
+        d_crys = strain_calculator.scherrer_eq(fwhm_data, peak_positions, self.wavelength)
+        return d_crys
+
+    def size_from_modified_scherrer_eq(self):
+        """
+        Compute the crystallite size from the modified Scherrer equation.
+
+        **Returns:**
+            - d_crys : float
+                The estimated average crystallite size.
+        """
+        fwhm_data, peak_positions = strain_calculator.estimate_fwhm_from_pxrd_no_profiling(self.two_theta, self.intensity)
+        d_crys = strain_calculator.modified_scherrer_eq(fwhm_data, peak_positions, self.wavelength)
+        return round(d_crys, 3)
+
 
 
 

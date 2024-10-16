@@ -5,8 +5,7 @@ repo_url: https://github.com/bafgreat/crystallite_size_calculator.git
 
 theme:
   name: material
-  logo: images/logo.png         # Optional: Add a custom logo (ensure path is correct)
-  favicon: images/favicon.ico    # Optional: Add a favicon (ensure path is correct)
+  logo: images/differaction_pattern.png
   palette:
     - scheme: default
       primary: indigo

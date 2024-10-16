@@ -27,6 +27,7 @@ from scipy.signal import find_peaks
 from pymatgen.core.structure import Structure
 from scipy.special import erf, wofz
 from scipy.optimize import curve_fit
+from scipy.stats import linregress
 
 
 
@@ -96,19 +97,10 @@ def williamson_hall_method(two_theta, intensities, wavelength):
     k = 0.9
     crystallite_size = (k * wavelength) / intercept
 
-
-    # plt.figure(figsize=(8, 6))
-    # plt.plot(x, y, 'bo', label='Data')
-    # plt.plot(x, np.polyval(coeffs, x), 'r-', label=f'Fit: Slope (Strain) = {strain:.4e}, Intercept (Crystallite Size) = {crystallite_size:.4f} nm')
-    # plt.xlabel(r'$4 \sin(\theta)$')
-    # plt.ylabel(r'$\beta \cos(\theta)$')
-    # plt.title('Williamson-Hall Plot')
-    # plt.legend()
-    # plt.show()
     return strain, crystallite_size
 
 
-def strain_from_williamson_hall_method(fwhm_data, theta_data, wavelength, crystallite_size):
+def strain_from_williamson_hall_method(fwhm_data, theta_position, wavelength, crystallite_size):
     """
     A function to calculate strain using the Williamson-Hall method.
     This method decomposes the broadening of diffraction peaks into
@@ -137,8 +129,8 @@ def strain_from_williamson_hall_method(fwhm_data, theta_data, wavelength, crysta
     **Parameters:**
         - fwhm_data : np.array
             Full-width at half maximum (in radians) for each peak.
-        - theta_data : np.array
-            Bragg angles (in degrees) for each peak.
+        - theta_psotion : np.array
+            Bragg angles (in degrees) for peaks, which are used to calculate FWHM
         - wavelength : float
             X-ray wavelength in Angstroms.
         - crystallite_size : float
@@ -148,7 +140,7 @@ def strain_from_williamson_hall_method(fwhm_data, theta_data, wavelength, crysta
         - strain : float
             The calculated strain value.
     """
-    theta_radians = np.radians(theta_data)
+    theta_radians = np.radians(theta_position)
     cos_theta = np.cos(theta_radians)
     sin_theta = np.sin(theta_radians)
 
@@ -160,16 +152,6 @@ def strain_from_williamson_hall_method(fwhm_data, theta_data, wavelength, crysta
 
     coeffs = np.polyfit(x, y, 1)
     strain = coeffs[0]
-
-    # plt.figure(figsize=(8, 6))
-    # plt.plot(x, y, 'bo', label='Data')
-    # plt.plot(x, np.polyval(coeffs, x), 'r-', label=f'Fit: Slope (Strain) = {strain:.4e}')
-    # plt.xlabel(r'$4 \sin(\theta)$')
-    # plt.ylabel(r'$\beta \cos(\theta)$')
-    # plt.title('Williamson-Hall Plot')
-    # plt.legend()
-    # plt.show()
-
     return strain
 
 
@@ -204,7 +186,7 @@ def voigt_profile(x, amplitude, center, sigma, gamma):
     return amplitude * np.real(wofz(z)) / (sigma * np.sqrt(2 * np.pi))
 
 
-def estimate_fwhm_from_pxrd(two_theta, intensities, prominence=0.1, height_threshold=0.05):
+def estimate_fwhm_from_pxrd(two_theta, intensities, height_threshold=0.01):
     """
     A function to estimate the Full Width at Half Maximum (FWHM)
     and peak positions from PXRD data. This function identifies
@@ -223,9 +205,6 @@ def estimate_fwhm_from_pxrd(two_theta, intensities, prominence=0.1, height_thres
             diffraction intensities were measured.
         - intensities : np.array
             Array of intensity values corresponding to the 2-theta values, representing the PXRD pattern.
-        - prominence : float, optional
-            The minimum prominence of peaks to be considered. This parameter helps differentiate significant
-            peaks from background noise. Default is 0.1.
         - height_threshold : float, optional
             The minimum height of peaks to be considered, as a fraction of the maximum intensity in the pattern.
             Default is 0.05 (i.e., 5% of the maximum intensity).
@@ -236,6 +215,8 @@ def estimate_fwhm_from_pxrd(two_theta, intensities, prominence=0.1, height_thres
         - peak_positions : np.array
             Array of 2-theta positions (in degrees) for each detected peak.
     """
+
+    prominence, peaks = compute_optimal_prominence(intensities)
     peaks, properties = find_peaks(intensities, prominence=prominence, height=height_threshold * np.max(intensities))
     fwhm_data = []
     peak_positions = []
@@ -255,32 +236,20 @@ def estimate_fwhm_from_pxrd(two_theta, intensities, prominence=0.1, height_thres
 
         if len(closest_to_half_max) >= 2:
             estimated_fwhm = peak_region_x[closest_to_half_max[-1]] - peak_region_x[closest_to_half_max[0]]
-            sigma = estimated_fwhm / (2 * np.sqrt(2 * np.log(2)))  # FWHM to sigma conversion
+            sigma = estimated_fwhm / (2 * np.sqrt(2 * np.log(2)))
         else:
-            estimated_fwhm = (peak_region_x[-1] - peak_region_x[0]) / 2  # Use full width as an estimate
+            estimated_fwhm = (peak_region_x[-1] - peak_region_x[0]) / 2
             sigma = estimated_fwhm / (2 * np.sqrt(2 * np.log(2)))
 
-        # Gamma as a fraction of FWHM
         gamma = estimated_fwhm / 2 if 'estimated_fwhm' in locals() else 0.1
 
         try:
             # Fit the Voigt profile using 'trf' method
-            popt, _ = curve_fit(
-                voigt_profile,
-                peak_region_x,
-                peak_region_y,
-                p0=[amplitude, center, sigma, gamma],
-                method='trf',
-                max_nfev=5000,  # Increase max_nfev
-                bounds=([0, center - 2, 0, 0], [np.inf, center + 2, np.inf, np.inf])
-            )
+            popt, _ = curve_fit(voigt_profile, peak_region_x, peak_region_y, p0=[amplitude, center, sigma, gamma], method='trf', max_nfev=5000, bounds=([0, center - 2, 0, 0], [np.inf, center + 2, np.inf, np.inf]))
             fitted_sigma = popt[2]
             fitted_gamma = popt[3]
-
-            # Calculate FWHM using Voigt parameters
             fwhm = 0.5346 * (2 * fitted_gamma) + np.sqrt(0.2166 * (2 * fitted_gamma)**2 + (2 * fitted_sigma)**2)
         except RuntimeError:
-            # Fallback to estimated FWHM if fitting fails
             fwhm = estimated_fwhm
 
         fwhm_data.append(fwhm)
@@ -288,13 +257,8 @@ def estimate_fwhm_from_pxrd(two_theta, intensities, prominence=0.1, height_thres
 
     return np.array(fwhm_data), np.array(peak_positions)
 
-def warren_averbach_method(two_theta,
-                           intensities,
-                           crystallite_size,
-                           wavelength,
-                           instrumental_fwhm=None,
-                           prominence=0.1,
-                           height_threshold=0.05):
+
+def warren_averbach_method(two_theta, intensities, crystallite_size, wavelength, height_threshold=0.05):
     """
     A function to calculate strain using the Warren-Averbach method.
     This method is used to separate the contributions of crystallite
@@ -409,18 +373,8 @@ def warren_averbach_method(two_theta,
             The calculated crystallite size, refined from the Fourier
             analysis of the diffraction peaks.
     """
-    # if instrumental_fwhm is None:
-    #     instrumental_fwhm = np.array([26.22637089, 36.93188358,  9.7547036 ])
 
-    fwhm_data, peak_positions = estimate_fwhm_from_pxrd_no_profiling(two_theta,
-                                                        intensities,
-                                                        prominence,
-                                                        height_threshold)
-
-    # fwhm_corrected = np.sqrt(fwhm_data**2 - instrumental_fwhm**2)
-    # we will not use the corrected instrumental_fwhm
-
-    # fwhm_data_radians = np.radians(fwhm_corrected)
+    fwhm_data, peak_positions = estimate_fwhm_from_pxrd_no_profiling(two_theta, intensities, height_threshold)
     fwhm_value = np.sqrt(fwhm_data)
     fwhm_data_radians = np.radians(fwhm_value)
     theta = np.radians(peak_positions / 2)
@@ -438,19 +392,10 @@ def warren_averbach_method(two_theta,
     d_crys = -1 / coefficients[1]
     strain = np.sqrt(-coefficients[0] / (2 * np.pi**2))
 
-    # Plot the Fourier coefficients and the fit
-    # plt.figure(figsize=(8, 6))
-    # plt.plot(l_values, a_l, 'bo', label='Fourier Coefficients A(L)')
-    # plt.plot(l_values, np.exp(np.polyval(coefficients, l_values)), 'r--', label='Fit')
-    # plt.xlabel('Fourier Length (L)')
-    # plt.ylabel('Fourier Coefficient A(L)')
-    # plt.title('Warren-Averbach Analysis')
-    # plt.legend()
-    # plt.show()
-    return strain, d_crys
+    return round(strain, 3), round(d_crys, 3)
 
 
-def estimate_fwhm_from_pxrd_no_profiling(two_theta, intensities, prominence=0.1, height_threshold=0.05):
+def estimate_fwhm_from_pxrd_no_profiling(two_theta, intensities, height_threshold=0.05):
     """
     Estimates the full width at half maximum (FWHM) for peaks in PXRD data.
 
@@ -471,7 +416,8 @@ def estimate_fwhm_from_pxrd_no_profiling(two_theta, intensities, prominence=0.1,
             List of 2-theta positions of the detected peaks.
     """
     normalized_intensities = intensities / np.max(intensities)
-    peak_indices, peak_properties = find_peaks(
+    prominence, _ = compute_optimal_prominence(intensities)
+    peak_indices, _ = find_peaks(
         normalized_intensities, height=height_threshold, prominence=prominence)
 
     fwhms = []
@@ -492,7 +438,106 @@ def estimate_fwhm_from_pxrd_no_profiling(two_theta, intensities, prominence=0.1,
         fwhm = two_theta[right_idx] - two_theta[left_idx]
         fwhms.append(fwhm)
         peak_positions.append(two_theta[peak_index])
-
-
     return np.array(fwhms), np.array(peak_positions)
 
+
+def scherrer_eq(fwhms, two_position, wavelength):
+    """
+    Computes the crystallite size using the Scherrer equation.
+
+    Parameters:
+    ----------
+    fwhms : np.array
+        Array of FWHM values for the peaks.
+    two_position : np.array fwhms
+        Two theta values for .
+
+    Returns:
+    -------
+    crystallite_sizes : np.array
+        Array of calculated crystallite sizes for the peaks.
+    """
+    theta = np.radians(np.array(two_position) / 2)
+    return (0.9 * wavelength) / (np.array(fwhms) * np.cos(theta))
+
+
+def modified_scherrer_eq(fwhms, two_theta_position, wavelength, K=0.9):
+    """
+    Computes the crystallite size using the modified Scherrer equation.
+
+    Parameters:
+    ----------
+    fwhms : array-like
+        Array of FWHM values for the peaks.
+    two_theta : array-like
+        Array of 2-theta values for the peaks.
+
+    Returns:
+    -------
+    crystallite_sizes : array-like
+        Array of calculated crystallite sizes for the peaks.
+    """
+    ln_beta = np.log(fwhms)
+    ln_1_cos_theta = np.log(1 / np.cos(np.radians(np.array(two_theta_position)/2.0)))
+    slope, intercept, _, _, _ = linregress(ln_1_cos_theta, ln_beta)
+
+    crystallite_size_modified = np.exp(intercept) * wavelength / K
+    return crystallite_size_modified
+
+
+
+
+
+def compute_optimal_prominence(intensity, min_prominence=0.01, max_prominence=1.0, tolerance=3, step=0.01):
+    """
+    Automatically determines the optimal prominence for the intensity
+    which can be used to find peaks.
+
+    **Parameters:**
+        - intensity : np.array
+            PXRD patterns.
+        - min_prominence : float
+            Minimum prominence value to start the search.
+        - max_prominence : float
+            Maximum prominence value to end the search.
+        - step : float
+            Step size to increase prominence during search.
+        - tolerance : int
+            The number of consecutive iterations without improvement before stopping.
+
+    **Returns:**
+        - optimal_prominence : float
+            The optimal prominence value that results in the best average prominence.
+        - peaks : np.array
+            The indices of peaks detected with the optimal prominence.
+    """
+
+    max_prominence_avg = 0
+    optimal_prominence = min_prominence
+    no_improvement_count = 0
+
+    if np.max(intensity) == 0:
+        raise ValueError("Maximum intensity is zero, unable to normalize.")
+
+    norm_intensity = intensity / np.max(intensity)
+
+    # Start with minimum prominence and incrementally adjust
+    for current_prominence in np.arange(min_prominence, max_prominence, step):
+        peaks, properties = find_peaks(norm_intensity, prominence=current_prominence)
+        prominences = properties["prominences"]
+
+        if len(prominences) > 0:
+            current_avg_prominence = np.mean(prominences)
+
+            # Check if we found a better prominence
+            if current_avg_prominence > max_prominence_avg:
+                max_prominence_avg = current_avg_prominence
+                optimal_prominence = current_prominence
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+
+        # If no improvement for a number of steps, break the loop
+        if no_improvement_count >= tolerance:
+            break
+    return optimal_prominence, peaks

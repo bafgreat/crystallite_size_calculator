@@ -2,7 +2,7 @@
 name = "crystallite-size-calculator"
 version = "0.1.0"
 description = ""
-authors = ["bafgreat <75862753+bafgreat@users.noreply.github.com>"]
+authors = ["Dinga Wonanke <bafgreat@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]

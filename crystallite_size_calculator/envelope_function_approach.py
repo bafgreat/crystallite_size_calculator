@@ -10,7 +10,6 @@ J. Appl. Cryst. (2024). 57, 1466–1476
 
 import numpy as np
 from scipy.optimize import curve_fit
-import matplotlib.pyplot as plt
 from scipy.stats import lognorm
 from scipy.signal import find_peaks
 
@@ -38,9 +37,9 @@ def find_maxima(r, g_r):
         >>> r_max, g_max = find_maxima(r, g_r)
         >>> plt.scatter(r_max, g_max)
     """
-    g_r, r = remove_nan(g_r, r)
+    g_r_clean, r_clean = remove_nan(g_r, r)
     maxima = (np.diff(np.sign(np.diff(g_r))) < 0).nonzero()[0] + 1
-    return r[maxima], g_r[maxima]
+    return r_clean[maxima], g_r_clean[maxima]
 
 
 def envelope_function(r, d_crys):
@@ -65,7 +64,7 @@ def envelope_function(r, d_crys):
     return (1 - 3/2 * r/d_crys + 1/2 * (r/d_crys)**3) * (r < d_crys)
 
 
-def fit_envelope(r_max, g_max):
+def fit_envelope(g_max, r_max):
     """
     Funtion to fit the envelope function to the peaks of the G(r) data to
     estimate the average crystallite size. This function takes the peaks of
@@ -86,23 +85,15 @@ def fit_envelope(r_max, g_max):
         >>> D = fit_envelope(r_max, g_max)
         >>> print(f"Estimated crystallite size: {D:.2f} nm")
     """
-    # Curve fitting the envelope function to the maxima
-    lower_bounds = [0, 0]   # Lower bounds for [D, n]
-    upper_bounds = [np.inf, 3]  # Upper bounds for [D, n]
+    lower_bounds = [0]
+    upper_bounds = [np.inf]
 
-    # Perform the curve fitting
-    popt, _ = curve_fit(envelope_function,
-                        r_max,
-                        g_max,
-                        bounds=(lower_bounds, upper_bounds)
-                        )
-
+    popt, _ = curve_fit(envelope_function, r_max, g_max, bounds=[lower_bounds, upper_bounds])
     d_crys = popt[0]
-    print (popt)
     return d_crys
 
 
-def fit_envelope_approximation(r, g_robs, interval_length=10):
+def fit_envelope_approximation(g_r, r):
     """
     Approximate the envelope function by extracting maxima from the G(r) data
     and fitting the envelope function.
@@ -110,7 +101,7 @@ def fit_envelope_approximation(r, g_robs, interval_length=10):
     **Parameters:**
        - r np.array:
         Array of radial distances.
-       - g_robs np.array:
+       - g_r np.array:
         Observed G(r) values.
        - interval_length: (int, optional):
         The length of the intervals for
@@ -120,25 +111,10 @@ def fit_envelope_approximation(r, g_robs, interval_length=10):
         - d_crys :float
             The estimated average crystallite size (D).
     """
-    # Normalize Gobs(r)
-    g_rnorm = g_robs / max(g_robs)
-
-    # Divide Gnorm into intervals and find the maxima in each interval
-    num_intervals = len(g_rnorm) // interval_length
-    r_max, g_max = [], []
-
-    for i in range(num_intervals):
-        start = i * interval_length
-        end = (i + 1) * interval_length
-        max_idx = np.argmax(g_rnorm[start:end])
-        r_max.append(r[start + max_idx])
-        g_max.append(g_rnorm[start + max_idx])
-    # Fit the envelope function to the extracted maxima
-    popt, _ = curve_fit(envelope_function, r_max, g_max,
-                        bounds=([0, 0], [np.inf, 3])
-                        )
-    d_crys = popt[0]  # Extract the fitted crystallite size (D)
-
+    g_rnorm = g_r / max(g_r)
+    r_max, g_max = adaptive_maxima_extraction(g_rnorm, r)
+    popt, _ = curve_fit(envelope_function, r_max, g_max)
+    d_crys = popt[0]
     return d_crys
 
 
@@ -276,58 +252,12 @@ def fit_envelope_function(g_r, radii, initial_guess=(5)):
 
 
     """
-    r_max, g_max = adaptive_maxima_extraction(g_r, radii)
+    r_max, g_max, _ = adaptive_maxima_extraction(g_r, radii)
     # r_max, g_max = extract_maxima(g_r, radii, num_intervals)
 
-    popt, pcov = curve_fit(spherical_envelope_function,
-                           r_max,
-                           g_max,
-                           p0=initial_guess
-                           )
+    popt, _ = curve_fit(spherical_envelope_function, r_max, g_max, p0=initial_guess)
     d_crys = popt[0]
     return d_crys
-
-
-def lognormal_envelope_function(r, d_crys, sigma):
-    """
-    This function computes the envelope function assuming a lognormal distribution
-    of crystallite sizes.
-
-    **Parameters:**
-        - r: np.array, Radial distance values.
-        - d_crys: float, The median crystallite size (for the lognormal distribution).
-        - sigma: float, The standard deviation of the crystallite size distribution.
-
-    **Returns:**
-        - np.array: The envelope function based on a lognormal distribution of sizes.
-    """
-    # Probability density function of lognormal distribution
-    pdf = lognorm.pdf(r, sigma, scale=d_crys)
-
-    # Envelope function based on lognormal distribution
-    return pdf * (1 - 3/2 * r/d_crys + 1/2 * (r/d_crys)**3) * (r < d_crys)
-
-
-def fit_lognormal_envelope(g_r, radii, num_intervals=5):
-    """
-    Function to fit a lognormal envelope function to the peaks of the G(r) data.
-    This function extracts the median crystallite size and distribution width.
-
-    **Parameters:**
-        - radii: np.array,
-            Radial distances.
-        - g_r: np.array,
-            G(r) values at.
-
-    **Returns:**
-        - d_crys: float, Estimated median crystallite size.
-        - sigma: float, Width of the lognormal distribution (spread).
-    """
-    r_max, g_max = extract_maxima(g_r, radii, num_intervals)
-    # r_max, g_max = adaptive_maxima_extraction(g_r, radii)
-    popt, _ = curve_fit(lognormal_envelope_function, r_max, g_max, bounds=([0, 0], [np.inf, 3]))
-    d_crys, sigma = popt
-    return d_crys, sigma
 
 
 def cubic_envelope_function(r, d_crys):
@@ -358,7 +288,7 @@ def plate_envelope_function(r, d_crys):
     return np.heaviside(d_crys - r, 0.5) * (1 - r/d_crys)
 
 
-def fit_envelope_with_shape(radii, g_r, shape='spherical'):
+def fit_envelope_with_shape(g_r, radii, shape='spherical'):
     """
     Function to fit the envelope function based on the shape of the crystallites.
     Supports spherical, cubic, and plate-like crystallites.
@@ -382,7 +312,6 @@ def fit_envelope_with_shape(radii, g_r, shape='spherical'):
     else:
         raise ValueError("Unsupported crystallite shape. Choose 'spherical', 'cubic', or 'plate'.")
 
-    # r_max, g_max = extract_maxima(g_r, radii, num_intervals)
     r_max, g_max = adaptive_maxima_extraction(g_r, radii)
     popt, _ = curve_fit(envelope_func, r_max, g_max, bounds=([0], [np.inf]))
     d_crys = popt[0]
@@ -406,7 +335,7 @@ def calculate_prominence_scipy(g_r):
     return prominences, peaks
 
 
-def adaptive_maxima_extraction(g_r, r, min_interval=3, max_interval=50, prominence=0.1, tolerance=3):
+def adaptive_maxima_extraction(g_r, r, min_interval=3, max_interval=50, tolerance=3):
     """
     Automatically determines the optimal interval size for extracting maxima by testing
     different intervals and identifying the one that maximizes peak prominence.
@@ -436,6 +365,7 @@ def adaptive_maxima_extraction(g_r, r, min_interval=3, max_interval=50, prominen
     best_interval = min_interval
     max_prominence = 0
     no_improvement_count = 0
+    g_rnorm = g_r / max(g_r)
 
     for interval in range(min_interval, max_interval + 1):
 
@@ -457,6 +387,6 @@ def adaptive_maxima_extraction(g_r, r, min_interval=3, max_interval=50, prominen
 
         if no_improvement_count >= tolerance:
             break
-    print (best_interval,prominences)
-    r_max, g_max = extract_maxima(g_r, r, num_intervals=best_interval)
+    num_intervals = len(g_rnorm) // best_interval
+    r_max, g_max = extract_maxima(g_r, r, num_intervals=num_intervals)
     return r_max, g_max
